@@ -3,7 +3,7 @@ import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
-# --- Step 1: Sample Movie Dataset ---
+
 movies = pd.DataFrame({
     'movie_id': [1, 2, 3, 4, 5],
     'title': ['Inception', 'Interstellar', 'The Dark Knight', 'Memento', 'Dunkirk'],
@@ -16,13 +16,13 @@ ratings = pd.DataFrame({
     'rating': [5, 4, 5, 3, 4, 5, 2, 4, 3, 5]
 })
 
-# --- Step 2: Content-Based Filtering ---
+#  Content-Based Filtering
 vectorizer = TfidfVectorizer()
 tfidf_matrix = vectorizer.fit_transform(movies['genre'])
 cosine_sim = cosine_similarity(tfidf_matrix)
 
 def content_recommendations(movie_title, top_n=3):
-    # Check if movie exists in our dataset
+    
     if movie_title not in movies['title'].values:
         return f"Movie '{movie_title}' not found in the database. Available movies are: {', '.join(movies['title'].tolist())}"
     
@@ -32,54 +32,51 @@ def content_recommendations(movie_title, top_n=3):
     movie_indices = [i[0] for i in scores[1:top_n+1]]
     return movies.iloc[movie_indices]['title'].tolist()
 
-# --- Step 3: Simple Collaborative Filtering ---
-# Create a user-item matrix
+# Simple Collaborative Filtering 
+
 user_item_matrix = ratings.pivot_table(index='user_id', columns='movie_id', values='rating', fill_value=0)
 
-# Calculate user similarity using cosine similarity
+
 user_similarity = cosine_similarity(user_item_matrix)
 
 def collaborative_recommendations(user_id, top_n=3):
-    # Check if user exists in our dataset
+    
     if user_id not in ratings['user_id'].values:
         return f"User {user_id} not found in the database. Available users are: {sorted(ratings['user_id'].unique().tolist())}"
     
-    # Convert user_id to matrix index
+  
     user_idx = user_item_matrix.index.get_loc(user_id)
     
-    # Get similar users
+    
     similar_users = list(enumerate(user_similarity[user_idx]))
     similar_users = sorted(similar_users, key=lambda x: x[1], reverse=True)
-    similar_users = [i for i in similar_users if i[0] != user_idx]  # Exclude the user itself
+    similar_users = [i for i in similar_users if i[0] != user_idx]  
     
-    # Get movies that the user hasn't rated
     user_ratings = user_item_matrix.iloc[user_idx].to_dict()
     unrated_movies = [m for m in movies['movie_id'] if user_ratings.get(m, 0) == 0]
-    
-    # Calculate predicted ratings
+
     predictions = []
     for movie_id in unrated_movies:
-        # Get ratings of similar users for this movie
+    
         movie_col = user_item_matrix[movie_id]
         weighted_sum = 0
         similarity_sum = 0
         
-        for similar_user_idx, similarity in similar_users[:3]:  # Use top 3 similar users
-            if movie_col.iloc[similar_user_idx] > 0:  # If the similar user rated this movie
+        for similar_user_idx, similarity in similar_users[:3]: 
+            if movie_col.iloc[similar_user_idx] > 0:  
                 weighted_sum += similarity * movie_col.iloc[similar_user_idx]
                 similarity_sum += similarity
-        
-        # Calculate predicted rating if possible
+            
         if similarity_sum > 0:
             predictions.append((movie_id, weighted_sum / similarity_sum))
     
-    # Sort predictions and get top N
+
     predictions = sorted(predictions, key=lambda x: x[1], reverse=True)
     recommended_movie_ids = [m[0] for m in predictions[:top_n]]
     
     return movies[movies['movie_id'].isin(recommended_movie_ids)]['title'].tolist()
 
-# --- Step 4: Interactive User Interface ---
+
 def get_recommendations():
     print("\n🎬 Movie Recommendation System 🎬")
     print("Available movies:", ", ".join(movies['title'].tolist()))
@@ -123,5 +120,5 @@ def get_recommendations():
         else:
             print("Invalid choice. Please enter 1, 2, or 3.")
 
-# Run the interactive interface
+
 get_recommendations()
