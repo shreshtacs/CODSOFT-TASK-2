@@ -2,10 +2,8 @@ import pandas as pd
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
-from surprise import Dataset, Reader, SVD
-from surprise.model_selection import train_test_split
 
-# Sample dataset
+# --- Step 1: Sample Movie Dataset ---
 movies = pd.DataFrame({
     'movie_id': [1, 2, 3, 4, 5],
     'title': ['Inception', 'Interstellar', 'The Dark Knight', 'Memento', 'Dunkirk'],
@@ -18,34 +16,112 @@ ratings = pd.DataFrame({
     'rating': [5, 4, 5, 3, 4, 5, 2, 4, 3, 5]
 })
 
-# Content-Based Filtering
+# --- Step 2: Content-Based Filtering ---
 vectorizer = TfidfVectorizer()
 tfidf_matrix = vectorizer.fit_transform(movies['genre'])
 cosine_sim = cosine_similarity(tfidf_matrix)
 
-def content_recommendations(movie_title):
+def content_recommendations(movie_title, top_n=3):
+    # Check if movie exists in our dataset
+    if movie_title not in movies['title'].values:
+        return f"Movie '{movie_title}' not found in the database. Available movies are: {', '.join(movies['title'].tolist())}"
+    
     idx = movies.index[movies['title'] == movie_title][0]
     scores = list(enumerate(cosine_sim[idx]))
     scores = sorted(scores, key=lambda x: x[1], reverse=True)
-    movie_indices = [i[0] for i in scores[1:4]]  # Top 3 recommendations
+    movie_indices = [i[0] for i in scores[1:top_n+1]]
     return movies.iloc[movie_indices]['title'].tolist()
 
-# Collaborative Filtering using SVD
-reader = Reader(rating_scale=(1, 5))
-data = Dataset.load_from_df(ratings[['user_id', 'movie_id', 'rating']], reader)
-trainset, testset = train_test_split(data, test_size=0.2)
-model = SVD()
-model.fit(trainset)
+# --- Step 3: Simple Collaborative Filtering ---
+# Create a user-item matrix
+user_item_matrix = ratings.pivot_table(index='user_id', columns='movie_id', values='rating', fill_value=0)
 
-def collaborative_recommendations(user_id, num_recommendations=3):
-    all_movie_ids = movies['movie_id'].unique()
-    rated_movies = ratings[ratings['user_id'] == user_id]['movie_id'].tolist()
-    unrated_movies = [m for m in all_movie_ids if m not in rated_movies]
-    predictions = [(m, model.predict(user_id, m).est) for m in unrated_movies]
+# Calculate user similarity using cosine similarity
+user_similarity = cosine_similarity(user_item_matrix)
+
+def collaborative_recommendations(user_id, top_n=3):
+    # Check if user exists in our dataset
+    if user_id not in ratings['user_id'].values:
+        return f"User {user_id} not found in the database. Available users are: {sorted(ratings['user_id'].unique().tolist())}"
+    
+    # Convert user_id to matrix index
+    user_idx = user_item_matrix.index.get_loc(user_id)
+    
+    # Get similar users
+    similar_users = list(enumerate(user_similarity[user_idx]))
+    similar_users = sorted(similar_users, key=lambda x: x[1], reverse=True)
+    similar_users = [i for i in similar_users if i[0] != user_idx]  # Exclude the user itself
+    
+    # Get movies that the user hasn't rated
+    user_ratings = user_item_matrix.iloc[user_idx].to_dict()
+    unrated_movies = [m for m in movies['movie_id'] if user_ratings.get(m, 0) == 0]
+    
+    # Calculate predicted ratings
+    predictions = []
+    for movie_id in unrated_movies:
+        # Get ratings of similar users for this movie
+        movie_col = user_item_matrix[movie_id]
+        weighted_sum = 0
+        similarity_sum = 0
+        
+        for similar_user_idx, similarity in similar_users[:3]:  # Use top 3 similar users
+            if movie_col.iloc[similar_user_idx] > 0:  # If the similar user rated this movie
+                weighted_sum += similarity * movie_col.iloc[similar_user_idx]
+                similarity_sum += similarity
+        
+        # Calculate predicted rating if possible
+        if similarity_sum > 0:
+            predictions.append((movie_id, weighted_sum / similarity_sum))
+    
+    # Sort predictions and get top N
     predictions = sorted(predictions, key=lambda x: x[1], reverse=True)
-    recommended_movie_ids = [m[0] for m in predictions[:num_recommendations]]
+    recommended_movie_ids = [m[0] for m in predictions[:top_n]]
+    
     return movies[movies['movie_id'].isin(recommended_movie_ids)]['title'].tolist()
 
-# Example usage
-print("Content-Based Recommendations for 'Inception':", content_recommendations('Inception'))
-print("Collaborative Filtering Recommendations for User 1:", collaborative_recommendations(1))
+# --- Step 4: Interactive User Interface ---
+def get_recommendations():
+    print("\n🎬 Movie Recommendation System 🎬")
+    print("Available movies:", ", ".join(movies['title'].tolist()))
+    print("Available users:", sorted(ratings['user_id'].unique().tolist()))
+    
+    while True:
+        print("\nChoose an option:")
+        print("1. Get content-based recommendations for a movie")
+        print("2. Get collaborative recommendations for a user")
+        print("3. Exit")
+        
+        choice = input("Enter your choice (1-3): ")
+        
+        if choice == '1':
+            movie_title = input("Enter a movie title: ")
+            recommendations = content_recommendations(movie_title)
+            print(f"\nRecommendations for '{movie_title}':")
+            if isinstance(recommendations, str):
+                print(recommendations)  # Error message
+            else:
+                for i, movie in enumerate(recommendations, 1):
+                    print(f"{i}. {movie}")
+        
+        elif choice == '2':
+            try:
+                user_id = int(input("Enter a user ID: "))
+                recommendations = collaborative_recommendations(user_id)
+                print(f"\nRecommendations for User {user_id}:")
+                if isinstance(recommendations, str):
+                    print(recommendations)  # Error message
+                else:
+                    for i, movie in enumerate(recommendations, 1):
+                        print(f"{i}. {movie}")
+            except ValueError:
+                print("Please enter a valid user ID (integer).")
+        
+        elif choice == '3':
+            print("Thank you for using the Movie Recommendation System!")
+            break
+        
+        else:
+            print("Invalid choice. Please enter 1, 2, or 3.")
+
+# Run the interactive interface
+get_recommendations()
